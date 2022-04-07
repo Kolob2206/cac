@@ -197,21 +197,6 @@ step "Deploy Amazon ECS Service" {
                 environmentVariables {
                 }
 
-                environmentVariables {
-                }
-
-                environmentVariables {
-                }
-
-                environmentVariables {
-                }
-
-                environmentVariables {
-                }
-
-                environmentVariables {
-                }
-
                 healthCheck {
                     retries = 5
                 }
