@@ -3,8 +3,8 @@ step "Notify Slack that deployment has started" {
     action {
         is_disabled = true
         properties = {
-            Octopus.Action.Template.Id = "ActionTemplates-101"
-            Octopus.Action.Template.Version = "12"
+            Octopus.Action.Template.Id = "ActionTemplates-1128"
+            Octopus.Action.Template.Version = "1"
             ssn_Channel = "#{Slack.Channel}"
             ssn_Color = "warning"
             ssn_HookUrl = "#{Slack.WebHook}"
@@ -266,8 +266,8 @@ step "Notify Slack that deployment has completed" {
     action {
         is_disabled = true
         properties = {
-            Octopus.Action.Template.Id = "ActionTemplates-101"
-            Octopus.Action.Template.Version = "12"
+            Octopus.Action.Template.Id = "ActionTemplates-1128"
+            Octopus.Action.Template.Version = "1"
             ssn_Channel = "#{Slack.Channel}"
             ssn_Color = "good"
             ssn_HookUrl = "#{Slack.WebHook}"
@@ -286,8 +286,8 @@ step "Notify Slack that deployment has failed" {
     action {
         is_disabled = true
         properties = {
-            Octopus.Action.Template.Id = "ActionTemplates-101"
-            Octopus.Action.Template.Version = "12"
+            Octopus.Action.Template.Id = "ActionTemplates-1128"
+            Octopus.Action.Template.Version = "1"
             ssn_Channel = "#{Slack.Channel}"
             ssn_Color = "danger"
             ssn_HookUrl = "#{Slack.WebHook}"
