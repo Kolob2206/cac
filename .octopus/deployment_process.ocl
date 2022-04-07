@@ -1,27 +1,301 @@
-step "Deploy a Package" {
-    properties = {
-        Octopus.Action.TargetRoles = "polling"
-    }
+step "Notify Slack that deployment has started" {
 
     action {
-        action_type = "Octopus.TentaclePackage"
+        is_disabled = true
         properties = {
-            Octopus.Action.EnabledFeatures = ",Octopus.Features.ConfigurationTransforms,Octopus.Features.ConfigurationVariables"
-            Octopus.Action.Package.AutomaticallyRunConfigurationTransformationFiles = "True"
-            Octopus.Action.Package.AutomaticallyUpdateAppSettingsAndConnectionStrings = "True"
-            Octopus.Action.Package.DownloadOnTentacle = "False"
-            Octopus.Action.Package.FeedId = "feeds-1"
-            Octopus.Action.Package.PackageId = "brotli"
+            Octopus.Action.Template.Id = "ActionTemplates-101"
+            Octopus.Action.Template.Version = "12"
+            ssn_Channel = "#{Slack.Channel}"
+            ssn_Color = "warning"
+            ssn_HookUrl = "#{Slack.WebHook}"
+            ssn_IconUrl = "https://octopus.com/content/resources/favicon.png"
+            ssn_Message = "#{Octopus.Project.Name} v#{Octopus.Release.Number} is deploying to #{Octopus.Environment.Name}"
+            ssn_Title = "Deployment started"
+            ssn_Username = "Octopus Deploy"
         }
-        worker_pool_variable = ""
+        worker_pool = "Hosted Windows"
+    }
+}
 
-        packages {
-            acquisition_location = "Server"
-            feed = "feeds-1"
-            package_id = "brotli"
+step "Create AWS ECS task definition" {
+
+    action {
+        action_type = "Octopus.AwsRunScript"
+        is_disabled = true
+        properties = {
+            Octopus.Action.Aws.AssumeRole = "False"
+            Octopus.Action.Aws.Region = "#{Aws.Region}"
+            Octopus.Action.AwsAccount.UseInstanceRole = "False"
+            Octopus.Action.AwsAccount.Variable = "Aws.Account"
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                $Region = $OctopusParameters["Octopus.Action.Amazon.RegionName"]
+                $TaskName = $OctopusParameters["Aws.Tasks.Name"]
+                $ExecutionRole = $(Get-IAMRole -RoleName "ecsTaskExecutionRole").Arn
+                
+                # Add web settings
+                $webPortMappings = New-Object "System.Collections.Generic.List[Amazon.ECS.Model.PortMapping]"
+                $webPortMappings.Add($(New-Object -TypeName "Amazon.ECS.Model.PortMapping" -Property @{ HostPort=80; ContainerPort=80; Protocol=[Amazon.ECS.TransportProtocol]::Tcp}))
+                
+                $webEnvironmentVariables = New-Object "System.Collections.Generic.List[Amazon.ECS.Model.KeyValuePair]"
+                $webEnvironmentVariables.Add($(New-Object -TypeName "Amazon.ECS.Model.KeyValuePair" -Property @{ Name="ASPNETCORE_ENVIRONMENT"; Value=$OctopusParameters["AspNetCore.Environment"] }))
+                $webEnvironmentVariables.Add($(New-Object -TypeName "Amazon.ECS.Model.KeyValuePair" -Property @{ Name="GRAYLOG_URL"; Value=$OctopusParameters["Graylog.Url"] }))
+                
+                # Add ECS default cloudwatch logging - Re-add to container definition to use
+                
+                $LogOptions = New-Object "System.Collections.Generic.Dictionary[System.String,System.String]"
+                $LogOptions.Add('awslogs-group',"/ecs/$TaskName")
+                $LogOptions.Add('awslogs-stream-prefix',"ecs")
+                $LogOptions.Add('awslogs-region',"ap-southeast-2")
+                
+                $LogCon = New-Object -TypeName Amazon.ECS.Model.LogConfiguration
+                $LogCon.LogDriver = [Amazon.ECS.LogDriver]::awslogs
+                $LogCon.Options = $LogOptions
+                
+                # Container Definitions
+                
+                $ContainerDefinitions = New-Object "System.Collections.Generic.List[Amazon.ECS.Model.ContainerDefinition]"
+                $ContainerDefinitions.Add($(New-Object -TypeName "Amazon.ECS.Model.ContainerDefinition" -Property @{ `
+                Name=$OctopusParameters['Aws.Containers.Api.Name'];`
+                Image=$OctopusParameters["Octopus.Action.Package[stp-api].Image"]; `
+                PortMappings=$webPortMappings; `
+                Environment=$webEnvironmentVariables; `
+                LogConfiguration=$LogCon;}))
+                
+                $TaskDefinition = Register-ECSTaskDefinition `
+                -ContainerDefinition $ContainerDefinitions `
+                -Cpu 512 `
+                -Family $TaskName `
+                -TaskRoleArn $ExecutionRole `
+                -ExecutionRoleArn $ExecutionRole `
+                -Memory 1024 `
+                -NetworkMode awsvpc `
+                -Region $Region `
+                -RequiresCompatibility "FARGATE"
+                
+                if(!$?)
+                {
+                    Write-Error "Failed to register new task definition"
+                    Exit 0
+                }
+                
+                $ClusterName = $OctopusParameters["Aws.Ecs.Cluster.Name"]
+                $ServiceName = $OctopusParameters["Aws.Ecs.Service.Name"]
+                
+                # Check to see if there is a service already
+                $service = (Get-ECSService -Cluster $ClusterName -Service $ServiceName)
+                
+                # Loadbalancer information for the service
+                
+                
+                $lb = @{
+                    ContainerName = $OctopusParameters['Aws.Container.Name']
+                    ContainerPort = 80
+                    TargetGroupArn = $OctopusParameters['Aws.Targetgroup.arn']
+                }
+                
+                if ($service.Services.Count -eq 0)
+                {
+                    Write-Host "Service $ServiceName doesn't exist, creating ..."
+                    $ServiceCreate = New-ECSService `
+                        -LaunchType FARGATE `
+                        -Cluster $ClusterName `
+                        -ServiceName $ServiceName `
+                        -TaskDefinition $TaskDefinition.TaskDefinitionArn `
+                        -DesiredCount 1 `
+                        -AwsvpcConfiguration_Subnet @($OctopusParameters['Aws.Subnet1.Id'], $OctopusParameters['Aws.Subnet2.Id']) `
+                        -AwsvpcConfiguration_SecurityGroup @($OctopusParameters['Aws.SecurityGroup.Id']) `
+                        -LoadBalancer $lb
+                }
+                else
+                {
+                    $ServiceUpdate = Update-ECSService `
+                        -Cluster $ClusterName `
+                        -ForceNewDeployment $true `
+                        -Service $ServiceName `
+                        -TaskDefinition $TaskDefinition.TaskDefinitionArn `
+                }
+                
+                if(!$?)
+                {
+                    Write-Error "Failed to register new task definition"
+                    Exit 0
+                }
+                
+                # Save task definition to output variable
+                Set-OctopusVariable -Name "TaskDefinitionArn" -Value $TaskDefinition.TaskDefinitionArn
+            EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+            OctopusUseBundledTooling = "True"
+        }
+        worker_pool = "Hosted Windows"
+
+        packages "stp-api" {
+            acquisition_location = "NotAcquired"
+            feed = "stp-api"
+            package_id = "stp-api"
             properties = {
+                Extract = "False"
                 SelectionMode = "immediate"
             }
         }
+    }
+}
+
+step "Deploy Amazon ECS Service" {
+    package_requirement = "AfterPackageAcquisition"
+    properties = {
+        Octopus.Action.TargetRoles = "stp-readytech-dev,stp-readytech-uat,stp-readytech-prod"
+    }
+
+    action {
+        action_type = "aws-ecs"
+        step_package_version = "1.1.1"
+        worker_pool_variable = ""
+
+        packages "stp-api" {
+            acquisition_location = "NotAcquired"
+            feed = "stp-api"
+            package_id = "stp-api"
+            step_package_inputs_reference_id = "c17b3c56-678d-46b2-8cbc-0bd7358ccad3"
+        }
+
+        inputs {
+            cfStackName = "stp-api"
+            desiredCount = 2
+            maximumHealthPercent = 200
+            minimumHealthPercent = 100
+            name = "stp-api"
+
+            additionalTags {
+                enableEcsManagedTags = true
+            }
+
+            containers {
+                containerName = "stp-api"
+                essential = true
+
+                containerImageReference {
+                    feedId = "Feeds-1104"
+                    imageName = "stp-api"
+                    referenceId = "c17b3c56-678d-46b2-8cbc-0bd7358ccad3"
+                }
+
+                containerLogging {
+                    type = "auto"
+                }
+
+                containerPortMappings {
+                    containerPort = 80
+                    protocol = "tcp"
+                }
+
+                containerStorage {
+                    readOnlyRootFileSystem = false
+                }
+
+                environmentVariables {
+                }
+
+                environmentVariables {
+                }
+
+                environmentVariables {
+                }
+
+                environmentVariables {
+                }
+
+                environmentVariables {
+                }
+
+                environmentVariables {
+                }
+
+                healthCheck {
+                    retries = 5
+                }
+
+                networkSettings {
+                    disableNetworking = false
+                }
+
+                repositoryAuthentication {
+                    type = "default"
+                }
+            }
+
+            loadBalancerMappings {
+                containerName = "#{Aws.Task.Name}"
+                containerPort = 80
+                targetGroupArn = "#{Aws.Targetgroup.arn}"
+            }
+
+            networkConfiguration {
+                autoAssignPublicIp = false
+
+                securityGroupIds {
+                    id = "#{Aws.SecurityGroup.Id}"
+                }
+
+                subnetIds {
+                    id = "#{Aws.Subnet1.Id}"
+                }
+
+                subnetIds {
+                    id = "#{Aws.Subnet2.Id}"
+                }
+            }
+
+            task {
+                cpu = 512
+                memory = 1024
+                taskExecutionRole = "#{Aws.Task.ExecutionRole.Arn}"
+                taskRole = "#{Aws.Task.Role.Arn}"
+            }
+
+            waitOption {
+                type = "waitUntilCompleted"
+            }
+        }
+    }
+}
+
+step "Notify Slack that deployment has completed" {
+
+    action {
+        is_disabled = true
+        properties = {
+            Octopus.Action.Template.Id = "ActionTemplates-101"
+            Octopus.Action.Template.Version = "12"
+            ssn_Channel = "#{Slack.Channel}"
+            ssn_Color = "good"
+            ssn_HookUrl = "#{Slack.WebHook}"
+            ssn_IconUrl = "https://octopus.com/content/resources/favicon.png"
+            ssn_Message = "#{Octopus.Project.Name} v#{Octopus.Release.Number} has deployed successfully to #{Octopus.Environment.Name}"
+            ssn_Title = "Deployment completed"
+            ssn_Username = "Octopus Deploy"
+        }
+        worker_pool = "Hosted Windows"
+    }
+}
+
+step "Notify Slack that deployment has failed" {
+    condition = "Failure"
+
+    action {
+        is_disabled = true
+        properties = {
+            Octopus.Action.Template.Id = "ActionTemplates-101"
+            Octopus.Action.Template.Version = "12"
+            ssn_Channel = "#{Slack.Channel}"
+            ssn_Color = "danger"
+            ssn_HookUrl = "#{Slack.WebHook}"
+            ssn_IconUrl = "https://octopus.com/content/resources/favicon.png"
+            ssn_Message = "#{Octopus.Project.Name} v#{Octopus.Release.Number} has failed to deploy successfully to #{Octopus.Environment.Name}"
+            ssn_Title = "Deployment failed"
+            ssn_Username = "Octopus Deploy"
+        }
+        worker_pool = "Hosted Windows"
     }
 }
