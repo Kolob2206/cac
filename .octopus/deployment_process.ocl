@@ -193,9 +193,6 @@ step "Deploy Amazon ECS Service" {
                 containerStorage {
                     readOnlyRootFileSystem = false
                 }
-                
-                environmentVariables [
-                ]
 
                 healthCheck {
                     retries = 5
