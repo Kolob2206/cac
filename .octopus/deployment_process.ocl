@@ -196,14 +196,14 @@ step "Deploy Amazon ECS Service" {
                 
                 environmentVariables [
                   {
-                    "type": "plain"
-                    "key": "ACCEPT_EULA"
-                    "value": "Y"
+                    type = "plain"
+                    key = "ACCEPT_EULA"
+                    value = "Y"
                   }
                   {
-                    "type": "plain"
-                    "key": "SA_PASSWORD"
-                    "value": "#{Project.Database.User.Password}"
+                    type = "plain"
+                    key = "SA_PASSWORD"
+                    value = "#{Project.Database.User.Password}"
                   }
                 ]
 
