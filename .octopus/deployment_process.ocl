@@ -151,7 +151,7 @@ step "Deploy Amazon ECS Service" {
     action {
         action_type = "aws-ecs"
         step_package_version = "1.1.1"
-        worker_pool_variable = null
+        worker_pool_variable = ""
 
         packages "stp-api" {
             acquisition_location = "NotAcquired"
@@ -192,9 +192,6 @@ step "Deploy Amazon ECS Service" {
 
                 containerStorage {
                     readOnlyRootFileSystem = false
-                }
-                
-                environmentVariables {
                 }
 
                 healthCheck {
