@@ -194,7 +194,17 @@ step "Deploy Amazon ECS Service" {
                     readOnlyRootFileSystem = false
                 }
                 
-                environmentVariables ["hi","val"
+                environmentVariables [
+                  {
+                    "type": "plain"
+                    "key": "ACCEPT_EULA"
+                    "value": "Y"
+                  }
+                  {
+                    "type": "plain"
+                    "key": "SA_PASSWORD"
+                    "value": "#{Project.Database.User.Password}"
+                  }
                 ]
 
                 healthCheck {
