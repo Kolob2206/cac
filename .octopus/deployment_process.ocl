@@ -17,8 +17,8 @@ step "Deploy a Package" {
 
         packages {
             acquisition_location = "Server"
-            feed = "Octopus Server (built-in)"
-            package_id = "brotli"
+            feed = null
+            package_id = null
             properties = {
                 SelectionMode = "immediate"
             }
