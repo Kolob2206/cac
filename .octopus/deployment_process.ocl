@@ -11,7 +11,7 @@ step "Deploy a Package" {
             Octopus.Action.Package.AutomaticallyUpdateAppSettingsAndConnectionStrings = "True"
             Octopus.Action.Package.DownloadOnTentacle = "False"
             Octopus.Action.Package.FeedId = null
-            Octopus.Action.Package.PackageId = "brotli"
+            Octopus.Action.Package.PackageId = null
         }
         worker_pool_variable = ""
 
