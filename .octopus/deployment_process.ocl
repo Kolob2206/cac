@@ -17,8 +17,8 @@ step "Deploy a Package" {
 
         packages {
             acquisition_location = "Server"
-            feed = null
-            package_id = null
+            feed = "feeds-1"
+            package_id = "brotli"
             properties = {
                 SelectionMode = "immediate"
             }
