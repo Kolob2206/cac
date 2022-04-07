@@ -10,7 +10,7 @@ step "Deploy a Package" {
             Octopus.Action.Package.AutomaticallyRunConfigurationTransformationFiles = "True"
             Octopus.Action.Package.AutomaticallyUpdateAppSettingsAndConnectionStrings = "True"
             Octopus.Action.Package.DownloadOnTentacle = "False"
-            Octopus.Action.Package.FeedId = "Octopus Server (built-in)"
+            Octopus.Action.Package.FeedId = null
             Octopus.Action.Package.PackageId = "brotli"
         }
         worker_pool_variable = ""
